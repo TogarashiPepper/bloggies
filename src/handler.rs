@@ -29,18 +29,18 @@ impl EventHandler for Handler {
 				"delete" => commands::blog::delete(&ctx, &command).await,
 				"rename" => commands::blog::rename(&ctx, &command, options).await,
 				"webhook" => commands::blog::webhook(&ctx, &command).await,
-				_ => Err(anyhow::anyhow!("Invalid blog subcommand")),
+				name => Err(anyhow::anyhow!("Invalid blog subcommand: {name}")),
 			},
 			"timeout" => match subcommand.name.as_str() {
 				"me" => commands::timeout::me(&ctx, &command, options).await,
-				_ => Err(anyhow::anyhow!("Invalid timeout subcommand")),
+				name => Err(anyhow::anyhow!("Invalid timeout subcommand: {name}")),
 			},
-			_ => Err(anyhow::anyhow!("Invalid command")),
+			name => Err(anyhow::anyhow!("Invalid command: {name}")),
 		};
 
 		if let Err(error) = result {
 			let message = CreateInteractionResponseMessage::new()
-				.content(format!(":no_entry_sign: {error}!"))
+				.content(format!(":no_entry_sign: {error}"))
 				.ephemeral(true);
 
 			let response = CreateInteractionResponse::Message(message);
@@ -52,13 +52,16 @@ impl EventHandler for Handler {
 	}
 
 	async fn message(&self, ctx: Context, message: Message) {
+		if message.author.bot {
+			return;
+		}
+
 		let topic = message
 			.guild_id
-			.and_then(|guild| ctx.cache.guild(guild))
-			.and_then(|guild| guild.channels.get(&message.channel_id).cloned())
-			.and_then(|channel| channel.topic);
+			.and_then(|guild_id| ctx.cache.guild(guild_id))
+			.and_then(|guild| guild.channels.get(&message.channel_id)?.topic.clone());
 
-		if topic.is_some_and(|topic| message.author.id.to_string() != topic) && !message.author.bot {
+		if topic.is_some_and(|topic| !topic.is_empty() && topic != message.author.id.to_string()) {
 			message.delete(&ctx).await.ok();
 		}
 	}

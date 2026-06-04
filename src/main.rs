@@ -1,5 +1,3 @@
-#![deny(clippy::all, clippy::nursery)]
-
 mod blogs;
 mod commands;
 mod handler;
@@ -13,13 +11,13 @@ use crate::handler::Handler;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	dotenvy::dotenv()?;
+	dotenvy::dotenv().ok();
 
 	let token = env::var("TOKEN")?;
 	let intents = GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES;
 
 	let mut client = Client::builder(token, intents)
-		.activity(ActivityData::custom("Managing your blog"))
+		.activity(ActivityData::custom("Managing your blogs"))
 		.event_handler(Handler)
 		.await?;
 

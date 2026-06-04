@@ -1,21 +1,21 @@
 [package]
 name = "bloggies"
 version = "0.1.0"
-authors = ["megatank58", "vaporoxx"]
 edition = "2024"
-description = "Ad Nauseam blog bot"
-repository = "https://github.com/ad-nauseam/bloggies"
-license = "ISC"
 default-run = "bloggies"
 
 [dependencies]
-anyhow = "1"
-dotenvy = "0.15"
+anyhow = "1.0.102"
+dotenvy = "0.15.7"
 
 [dependencies.serenity]
-version = "0.12"
+version = "0.12.5"
 features = ["collector"]
 
 [dependencies.tokio]
-version = "1"
+version = "1.52.3"
 features = ["macros", "rt-multi-thread"]
+
+[lints.clippy]
+nursery = "warn"
+pedantic = "warn"

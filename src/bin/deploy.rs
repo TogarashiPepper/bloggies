@@ -5,7 +5,7 @@ use serenity::all::{CommandOptionType, CreateCommand, CreateCommandOption, Guild
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	dotenvy::dotenv()?;
+	dotenvy::dotenv().ok();
 
 	let application_id = env::var("APPLICATION_ID")?.parse()?;
 	let guild_id: GuildId = env::var("GUILD_ID")?.parse()?;
@@ -13,11 +13,7 @@ async fn main() -> Result<()> {
 	let token = env::var("TOKEN")?;
 	let http = HttpBuilder::new(token).application_id(application_id).build();
 
-	let claim = CreateCommandOption::new(
-		CommandOptionType::SubCommand,
-		"claim",
-		"Fix permission issues on your blog",
-	);
+	let claim = CreateCommandOption::new(CommandOptionType::SubCommand, "claim", "Fixes your blog permissions");
 	let create = CreateCommandOption::new(CommandOptionType::SubCommand, "create", "Creates a new blog");
 	let delete = CreateCommandOption::new(CommandOptionType::SubCommand, "delete", "Deletes your blog");
 	let webhook = CreateCommandOption::new(CommandOptionType::SubCommand, "webhook", "Gets a webhook for your blog");

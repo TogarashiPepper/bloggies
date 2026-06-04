@@ -4,28 +4,21 @@ use anyhow::Result;
 use serenity::all::{
 	ActionRowComponent, CommandDataOption, CommandInteraction, Context, CreateActionRow, CreateChannel,
 	CreateInputText, CreateInteractionResponse, CreateInteractionResponseMessage, CreateModal, CreateWebhook,
-	EditChannel, InputTextStyle, ModalInteractionCollector, PermissionOverwrite, PermissionOverwriteType, Permissions,
-	Webhook,
+	EditChannel, InputTextStyle, ModalInteractionCollector, Webhook,
 };
 
 use crate::blogs::Blogs;
 
 pub async fn claim(ctx: &Context, interaction: &CommandInteraction) -> Result<()> {
-	let mut blogs = Blogs::new(ctx, interaction).await?;
-	let channel = blogs.channel(interaction.user.id)?;
+	let mut blogs = Blogs::new(ctx, interaction)?;
 
-	channel
-		.edit(
-			ctx,
-			EditChannel::new().permissions([PermissionOverwrite {
-				allow: Permissions::SEND_MESSAGES,
-				deny: Permissions::empty(),
-				kind: PermissionOverwriteType::Member(interaction.user.id),
-			}]),
-		)
-		.await?;
+	let builder = EditChannel::new()
+		.audit_log_reason("Used blog-claim command")
+		.permissions(blogs.permissions());
 
-	let message = CreateInteractionResponseMessage::new().content("Your blog channel has been reclaimed!");
+	blogs.channel()?.edit(ctx, builder).await?;
+
+	let message = CreateInteractionResponseMessage::new().content("Your blog permissions have been fixed!");
 	let response = CreateInteractionResponse::Message(message);
 
 	interaction.create_response(ctx, response).await?;
@@ -34,29 +27,19 @@ pub async fn claim(ctx: &Context, interaction: &CommandInteraction) -> Result<()
 }
 
 pub async fn create(ctx: &Context, interaction: &CommandInteraction) -> Result<()> {
-	let mut blogs = Blogs::new(ctx, interaction).await?;
+	let mut blogs = Blogs::new(ctx, interaction)?;
 
-	if blogs.channel(interaction.user.id).is_ok() {
-		anyhow::bail!("You already have a blog channel");
+	if blogs.channel().is_ok() {
+		anyhow::bail!("You already have a blog channel!");
 	}
 
 	let builder = CreateChannel::new(&interaction.user.name)
-		.category(blogs.category)
-		.topic(interaction.user.id.to_string())
-		.permissions([
-			PermissionOverwrite {
-				allow: Permissions::empty(),
-				deny: Permissions::SEND_MESSAGES,
-				kind: PermissionOverwriteType::Role(blogs.guild.everyone_role()),
-			},
-			PermissionOverwrite {
-				allow: Permissions::SEND_MESSAGES,
-				deny: Permissions::empty(),
-				kind: PermissionOverwriteType::Member(interaction.user.id),
-			},
-		]);
+		.audit_log_reason("Used blog-create command")
+		.category(blogs.category_id)
+		.permissions(blogs.permissions())
+		.topic(blogs.user_id.to_string());
 
-	let channel = blogs.guild.create_channel(ctx, builder).await?;
+	let channel = blogs.guild_id.create_channel(ctx, builder).await?;
 
 	blogs.channels.push(channel);
 	blogs.reorder(ctx).await?;
@@ -70,39 +53,44 @@ pub async fn create(ctx: &Context, interaction: &CommandInteraction) -> Result<(
 }
 
 pub async fn delete(ctx: &Context, interaction: &CommandInteraction) -> Result<()> {
-	let mut blogs = Blogs::new(ctx, interaction).await?;
-	let channel = blogs.channel(interaction.user.id)?;
+	let mut blogs = Blogs::new(ctx, interaction)?;
+	let channel = blogs.channel()?;
 
 	let label = format!("Enter your blog name: {}", channel.name);
-	let row = CreateActionRow::InputText(CreateInputText::new(InputTextStyle::Short, label, ""));
+	let row = CreateActionRow::InputText(CreateInputText::new(InputTextStyle::Short, label, "id"));
 
-	let modal = CreateModal::new("", "Confirm Deletion").components(vec![row]);
+	let modal = CreateModal::new("id", "Confirm Deletion").components(vec![row]);
 	let response = CreateInteractionResponse::Modal(modal);
 
 	interaction.create_response(ctx, response).await?;
 
 	let interaction = ModalInteractionCollector::new(&ctx.shard)
 		.author_id(interaction.user.id)
-		.timeout(Duration::from_secs(60))
+		.timeout(Duration::from_mins(1))
 		.await
-		.ok_or_else(|| anyhow::anyhow!("Modal timeout exceeded"))?;
+		.ok_or_else(|| anyhow::anyhow!("Modal timeout exceeded!"))?;
 
-	let Some(row) = interaction.data.components.first() else {
-		anyhow::bail!("No action row present");
+	let row = interaction
+		.data
+		.components
+		.first()
+		.ok_or_else(|| anyhow::anyhow!("Modal response has no action rows!"))?;
+
+	let input = match row.components.first() {
+		Some(ActionRowComponent::InputText(input)) => input.value.as_deref().unwrap_or_default(),
+		Some(_) => anyhow::bail!("Component is not an input text!"),
+		None => anyhow::bail!("Action row has no components!"),
 	};
 
-	let Some(ActionRowComponent::InputText(input)) = row.components.first() else {
-		anyhow::bail!("No input text present");
-	};
+	if input != channel.name {
+		anyhow::bail!("Input ({input}) did not match the blog name for {channel}!");
+	}
 
-	let content = if input.value.as_ref() == Some(&channel.name) {
-		channel.delete(&ctx).await?;
-		"Your blog channel has been deleted!"
-	} else {
-		"Blog deletion cancelled, please enter the correct name!"
-	};
+	ctx.http
+		.delete_channel(channel.id, Some("Used blog-delete command"))
+		.await?;
 
-	let message = CreateInteractionResponseMessage::new().content(content);
+	let message = CreateInteractionResponseMessage::new().content("Your blog channel has been deleted!");
 	let response = CreateInteractionResponse::Message(message);
 
 	interaction.create_response(ctx, response).await?;
@@ -111,15 +99,19 @@ pub async fn delete(ctx: &Context, interaction: &CommandInteraction) -> Result<(
 }
 
 pub async fn rename(ctx: &Context, interaction: &CommandInteraction, options: &[CommandDataOption]) -> Result<()> {
-	let mut blogs = Blogs::new(ctx, interaction).await?;
-	let channel = blogs.channel(interaction.user.id)?;
+	let mut blogs = Blogs::new(ctx, interaction)?;
+	let channel = blogs.channel()?;
 
-	let name = match options.first().and_then(|option| option.value.as_str()) {
-		Some(name) => name,
-		None => &interaction.user.name,
-	};
+	let name = options
+		.first()
+		.and_then(|option| option.value.as_str())
+		.unwrap_or(&interaction.user.name);
 
-	channel.edit(ctx, EditChannel::new().name(name)).await?;
+	let builder = EditChannel::new()
+		.audit_log_reason("Used blog-rename command")
+		.name(name);
+
+	channel.edit(ctx, builder).await?;
 	blogs.reorder(ctx).await?;
 
 	let message = CreateInteractionResponseMessage::new().content("Your blog channel has been renamed!");
@@ -131,14 +123,15 @@ pub async fn rename(ctx: &Context, interaction: &CommandInteraction, options: &[
 }
 
 pub async fn webhook(ctx: &Context, interaction: &CommandInteraction) -> Result<()> {
-	let mut blogs = Blogs::new(ctx, interaction).await?;
-	let channel = blogs.channel(interaction.user.id)?;
+	let mut blogs = Blogs::new(ctx, interaction)?;
+	let channel = blogs.channel()?;
 
+	let builder = CreateWebhook::new("Blog").audit_log_reason("Used blog-webhook command");
 	let webhooks = channel.webhooks(ctx).await?;
 
 	let url = match webhooks.iter().flat_map(Webhook::url).next() {
 		Some(url) => url,
-		None => channel.create_webhook(ctx, CreateWebhook::new("Blog")).await?.url()?,
+		None => channel.create_webhook(ctx, builder).await?.url()?,
 	};
 
 	let message = CreateInteractionResponseMessage::new()

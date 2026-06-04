@@ -1,6 +1,5 @@
-# Build
+# Build Output
 target
-.pre-commit-config.yaml
 
-# Private
+# Environment Variables
 .env
